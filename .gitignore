@@ -1,0 +1,28 @@
+build/
+*.db
+*.db-journal
+.vscode/
+.idea/
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Compiled files
+*.exe
+*.obj
+*.o
+*.lib
+*.dll
+*.pdb
+
+# SQLite temporary files
+*.db-wal
+*.db-shm
