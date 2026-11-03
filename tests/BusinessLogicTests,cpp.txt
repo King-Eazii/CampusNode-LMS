@@ -1,0 +1,137 @@
+
+#include <gtest/gtest.h>
+
+#include "services/LatePenaltyPolicy.h"
+#include "common/Validation.h"
+#include "common/Exceptions.h"
+
+using namespace lms;
+
+// ==========================================
+// TEST GROUP 1: LATE PENALTY POLICY
+// ==========================================
+
+class LatePenaltyTest : public ::testing::Test {
+protected:
+    TenPercentPerDayPolicy policy;
+
+    const double maxMark = 100.0;
+    const std::string deadline = "2026/01/01 10:00";
+};
+
+TEST_F(LatePenaltyTest, OnTimeSubmissionHasNoPenalty) {
+    EXPECT_DOUBLE_EQ(
+        policy.calculatePenalty(maxMark, deadline, deadline),
+        0.0
+    );
+}
+
+TEST_F(LatePenaltyTest, OneMinuteLateHasTenPercentPenalty) {
+    EXPECT_DOUBLE_EQ(
+        policy.calculatePenalty(
+            maxMark, "2026/01/01 10:01", deadline
+        ),
+        10.0
+    );
+}
+
+TEST_F(LatePenaltyTest, OneDayLateHasTenPercentPenalty) {
+    EXPECT_DOUBLE_EQ(
+        policy.calculatePenalty(
+            maxMark, "2026/01/02 10:00", deadline
+        ),
+        10.0
+    );
+}
+
+TEST_F(LatePenaltyTest, TwoDaysLateHasTwentyPercentPenalty) {
+    EXPECT_DOUBLE_EQ(
+        policy.calculatePenalty(
+            maxMark, "2026/01/03 10:00", deadline
+        ),
+        20.0
+    );
+}
+
+TEST_F(LatePenaltyTest, ThreeDaysLateHasThirtyPercentPenalty) {
+    EXPECT_DOUBLE_EQ(
+        policy.calculatePenalty(
+            maxMark, "2026/01/04 10:00", deadline
+        ),
+        30.0
+    );
+}
+
+TEST_F(LatePenaltyTest, MoreThanThreeDaysLateLosesEntireMark) {
+    EXPECT_DOUBLE_EQ(
+        policy.calculatePenalty(
+            maxMark, "2026/01/05 10:00", deadline
+        ),
+        100.0
+    );
+}
+
+// ==========================================
+// TEST GROUP 2: MARK VALIDATION
+// ==========================================
+
+TEST(ValidationTest, AcceptsZeroMark) {
+    EXPECT_NO_THROW(validation::requireMark(0, 100));
+}
+
+TEST(ValidationTest, AcceptsMaximumMark) {
+    EXPECT_NO_THROW(validation::requireMark(100, 100));
+}
+
+TEST(ValidationTest, RejectsNegativeMark) {
+    EXPECT_THROW(
+        validation::requireMark(-1, 100),
+        ValidationException
+    );
+}
+
+TEST(ValidationTest, RejectsMarkAboveMaximum) {
+    EXPECT_THROW(
+        validation::requireMark(101, 100),
+        ValidationException
+    );
+}
+
+// ==========================================
+// TEST GROUP 3: USERNAME VALIDATION
+// ==========================================
+
+TEST(ValidationTest, AcceptsValidUsername) {
+    EXPECT_NO_THROW(validation::requireUsername("student123"));
+}
+
+TEST(ValidationTest, RejectsUsernameBelowMinimumLength) {
+    EXPECT_THROW(
+        validation::requireUsername("ab"),
+        ValidationException
+    );
+}
+
+TEST(ValidationTest, RejectsUsernameAboveMaximumLength) {
+    EXPECT_THROW(
+        validation::requireUsername("abcdefghijklmnopqrstuvwxyz12345"),
+        ValidationException
+    );
+}
+
+// ==========================================
+// TEST GROUP 4: REQUIRED TEXT VALIDATION
+// ==========================================
+
+TEST(ValidationTest, RejectsEmptyRequiredText) {
+    EXPECT_THROW(
+        validation::requireText("   ", "Title", 100),
+        ValidationException
+    );
+}
+
+TEST(ValidationTest, AcceptsValidRequiredText) {
+    EXPECT_NO_THROW(
+        validation::requireText("Assignment 1", "Title", 100)
+    );
+}

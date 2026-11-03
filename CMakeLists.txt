@@ -35,3 +35,30 @@ target_link_libraries(lms PRIVATE lms_core)
 if(NOT MSVC)
   target_compile_options(lms PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+
+
+# Testing configuration using GoogleTest.
+include(CTest)
+
+if(BUILD_TESTING)
+    include(FetchContent)
+
+    FetchContent_Declare(
+        googletest
+        URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.zip
+    )
+
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(googletest)
+
+    add_executable(campusnode_tests
+        tests/BusinessLogicTests.cpp
+    )
+
+    target_link_libraries(campusnode_tests
+        PRIVATE lms_core GTest::gtest_main
+    )
+
+    include(GoogleTest)
+    gtest_discover_tests(campusnode_tests)
+endif()
