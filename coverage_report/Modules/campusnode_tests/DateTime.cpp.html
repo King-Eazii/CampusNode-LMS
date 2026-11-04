@@ -1,0 +1,127 @@
+﻿<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+	<head>
+        <meta charset="utf-8"/>
+	    <title>DateTime.cpp</title>
+	    <link href="../../third-party/google-code-prettify/prettify-CppCoverage.css" type="text/css" rel="stylesheet" />
+	    <script type="text/javascript" src="../../third-party/google-code-prettify/prettify.js"></script>
+	</head>
+    <body onload="prettyPrint()">
+        <h4></h4>
+        <pre class="prettyprint lang-cpp linenums">
+#include "common/DateTime.h"
+
+#include &lt;cstdio&gt;
+#include &lt;ctime&gt;
+
+#include "common/Exceptions.h"
+
+namespace lms::datetime {
+namespace {
+
+constexpr long long kSecondsPerDay = 86400;
+
+// Days since 1970-01-01 for a calendar date (Howard Hinnant's algorithm).
+<span style = "background-color:#dfd">long long daysFromCivil(int y, int m, int d) {
+    y -= m &lt;= 2 ? 1 : 0;
+    const int era = (y &gt;= 0 ? y : y - 399) / 400;
+    const int yoe = y - era * 400;
+    const int doy = (153 * (m + (m &gt; 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    const int doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return static_cast&lt;long long&gt;(era) * 146097 + doe - 719468;
+}</span>
+
+<span style = "background-color:#fdd">void civilFromDays(long long z, int&amp; y, int&amp; m, int&amp; d) {
+    z += 719468;
+    const long long era = (z &gt;= 0 ? z : z - 146096) / 146097;
+    const int doe = static_cast&lt;int&gt;(z - era * 146097);
+    const int yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    y = static_cast&lt;int&gt;(yoe + era * 400);
+    const int doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    const int mp = (5 * doy + 2) / 153;
+    d = doy - (153 * mp + 2) / 5 + 1;
+    m = mp &lt; 10 ? mp + 3 : mp - 9;
+    y += m &lt;= 2 ? 1 : 0;
+}</span>
+
+<span style = "background-color:#fdd">bool isLeap(int y) { return (y % 4 == 0 &amp;&amp; y % 100 != 0) || y % 400 == 0; }</span>
+
+<span style = "background-color:#fdd">int daysInMonth(int y, int m) {</span>
+    static const int days[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+<span style = "background-color:#fdd">    return (m == 2 &amp;&amp; isLeap(y)) ? 29 : days[m - 1];
+}</span>
+
+}  // namespace
+
+<span style = "background-color:#fdd">std::string now() {
+    const std::time_t t = std::time(nullptr);
+    std::tm local{};</span>
+#ifdef _WIN32
+<span style = "background-color:#fdd">    localtime_s(&amp;local, &amp;t);</span>
+#else
+    localtime_r(&amp;t, &amp;local);
+#endif
+    char buffer[32];
+<span style = "background-color:#fdd">    std::strftime(buffer, sizeof buffer, "%Y-%m-%d %H:%M:%S", &amp;local);
+    return buffer;
+}</span>
+
+<span style = "background-color:#fdd">std::string normalise(const std::string&amp; text) {
+    int y = 0, mo = 0, d = 0, h = 0, mi = 0, s = 0, used = 0;
+    int count = std::sscanf(text.c_str(), "%d-%d-%d %d:%d:%d%n", &amp;y, &amp;mo, &amp;d, &amp;h, &amp;mi, &amp;s, &amp;used);
+    if (count != 6) {
+        s = 0;
+        count = std::sscanf(text.c_str(), "%d-%d-%d %d:%d%n", &amp;y, &amp;mo, &amp;d, &amp;h, &amp;mi, &amp;used);
+        if (count != 5) throw ValidationException("Use the format YYYY-MM-DD HH:MM, for example 2026-11-20 17:00.");</span>
+    }
+    if (static_cast&lt;std::size_t&gt;(used) != text.size() || y &lt; 2000 || y &gt; 2100 || mo &lt; 1 || mo &gt; 12 || d &lt; 1 ||
+<span style = "background-color:#fdd">        d &gt; daysInMonth(y, mo) || h &lt; 0 || h &gt; 23 || mi &lt; 0 || mi &gt; 59 || s &lt; 0 || s &gt; 59) {
+        throw ValidationException("That is not a valid date and time. Use YYYY-MM-DD HH:MM.");</span>
+    }
+    char buffer[32];
+<span style = "background-color:#fdd">    std::snprintf(buffer, sizeof buffer, "%04d-%02d-%02d %02d:%02d:%02d", y, mo, d, h, mi, s);
+    return buffer;
+}</span>
+
+<span style = "background-color:#dfd">long long toSeconds(const std::string&amp; iso) {
+    int y = 0, mo = 0, d = 0, h = 0, mi = 0, s = 0;
+    if (std::sscanf(iso.c_str(), "%d-%d-%d %d:%d:%d", &amp;y, &amp;mo, &amp;d, &amp;h, &amp;mi, &amp;s) != 6) {</span>
+<span style = "background-color:#fdd">        throw ValidationException("Invalid stored date: " + iso);</span>
+    }
+<span style = "background-color:#dfd">    return daysFromCivil(y, mo, d) * kSecondsPerDay + h * 3600 + mi * 60 + s;
+}</span>
+
+<span style = "background-color:#fdd">std::string fromSeconds(long long seconds) {
+    long long days = seconds / kSecondsPerDay;
+    long long rest = seconds % kSecondsPerDay;
+    if (rest &lt; 0) { rest += kSecondsPerDay; --days; }
+    int y = 0, m = 0, d = 0;
+    civilFromDays(days, y, m, d);</span>
+    char buffer[32];
+<span style = "background-color:#fdd">    std::snprintf(buffer, sizeof buffer, "%04d-%02d-%02d %02d:%02d:%02d", y, m, d,</span>
+                  static_cast&lt;int&gt;(rest / 3600), static_cast&lt;int&gt;(rest % 3600 / 60), static_cast&lt;int&gt;(rest % 60));
+<span style = "background-color:#fdd">    return buffer;
+}</span>
+
+<span style = "background-color:#dfd">int daysLate(const std::string&amp; submittedAt, const std::string&amp; deadline) {
+    const long long diff = toSeconds(submittedAt) - toSeconds(deadline);
+    if (diff &lt;= 0) return 0;
+    return static_cast&lt;int&gt;((diff + kSecondsPerDay - 1) / kSecondsPerDay);
+}</span>
+
+}  // namespace lms::datetime</pre>
+        <hr />
+        <table width="100%">
+            <thead>
+                <tr>
+                    <th align="center">
+                        <small>Generated by</small>
+                        <a href="https://github.com/OpenCppCoverage/OpenCppCoverage/releases">
+                            <strong>OpenCppCoverage (Version: 0.9.9.0)</strong>
+                        </a>
+                    </th>
+                </tr>
+            </thead>
+        </table>
+    </body>
+</html>

@@ -1,0 +1,185 @@
+﻿<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+	<head>
+        <meta charset="utf-8"/>
+	    <title>DatabaseManager.cpp</title>
+	    <link href="../../third-party/google-code-prettify/prettify-CppCoverage.css" type="text/css" rel="stylesheet" />
+	    <script type="text/javascript" src="../../third-party/google-code-prettify/prettify.js"></script>
+	</head>
+    <body onload="prettyPrint()">
+        <h4></h4>
+        <pre class="prettyprint lang-cpp linenums">
+#include "data/DatabaseManager.h"
+
+#include &lt;sqlite3.h&gt;
+
+#include &lt;filesystem&gt;
+#include &lt;fstream&gt;
+
+#include "SchemaSql.h"
+#include "common/Exceptions.h"
+
+namespace lms {
+namespace {
+
+<span style = "background-color:#dfd">void check(int result, sqlite3* db, int expected = SQLITE_OK) {
+    if (result != expected) throw DatabaseException(std::string("Database error: ") + sqlite3_errmsg(db));
+}</span>
+
+}  // namespace
+
+// ---------------------------------------------------------------- Statement
+<span style = "background-color:#dfd">Statement::Statement(sqlite3* db, const std::string&amp; sql) : db_(db), stmt_(nullptr) {
+    check(sqlite3_prepare_v2(db_, sql.c_str(), -1, &amp;stmt_, nullptr), db_);
+}</span>
+
+<span style = "background-color:#dfd">Statement::~Statement() {
+    if (stmt_ != nullptr) sqlite3_finalize(stmt_);
+}</span>
+
+<span style = "background-color:#fdd">Statement::Statement(Statement&amp;&amp; other) noexcept : db_(other.db_), stmt_(other.stmt_) { other.stmt_ = nullptr; }</span>
+
+<span style = "background-color:#dfd">void Statement::bindInt(int index, long long value) { check(sqlite3_bind_int64(stmt_, index, value), db_); }</span>
+<span style = "background-color:#fdd">void Statement::bindDouble(int index, double value) { check(sqlite3_bind_double(stmt_, index, value), db_); }</span>
+<span style = "background-color:#dfd">void Statement::bindText(int index, const std::string&amp; value) {
+    check(sqlite3_bind_text(stmt_, index, value.c_str(), static_cast&lt;int&gt;(value.size()), SQLITE_TRANSIENT), db_);
+}
+void Statement::bindNull(int index) { check(sqlite3_bind_null(stmt_, index), db_); }
+void Statement::bindOptionalInt(int index, const std::optional&lt;int&gt;&amp; value) {
+    value ? bindInt(index, *value) : bindNull(index);
+}</span>
+<span style = "background-color:#fdd">void Statement::bindOptionalDouble(int index, const std::optional&lt;double&gt;&amp; value) {
+    value ? bindDouble(index, *value) : bindNull(index);
+}</span>
+<span style = "background-color:#dfd">void Statement::bindOptionalText(int index, const std::optional&lt;std::string&gt;&amp; value) {
+    value ? bindText(index, *value) : bindNull(index);
+}</span>
+
+<span style = "background-color:#dfd">bool Statement::step() {
+    const int result = sqlite3_step(stmt_);
+    if (result == SQLITE_ROW) return true;
+    if (result == SQLITE_DONE) return false;</span>
+<span style = "background-color:#fdd">    throw DatabaseException(std::string("Database error: ") + sqlite3_errmsg(db_));</span>
+<span style = "background-color:#dfd">}</span>
+
+<span style = "background-color:#dfd">void Statement::run() { step(); }</span>
+
+<span style = "background-color:#dfd">long long Statement::columnInt(int index) const { return sqlite3_column_int64(stmt_, index); }</span>
+<span style = "background-color:#fdd">double Statement::columnDouble(int index) const { return sqlite3_column_double(stmt_, index); }</span>
+<span style = "background-color:#dfd">std::string Statement::columnText(int index) const {
+    const unsigned char* text = sqlite3_column_text(stmt_, index);
+    return text == nullptr ? std::string() : std::string(reinterpret_cast&lt;const char*&gt;(text));
+}
+bool Statement::isNull(int index) const { return sqlite3_column_type(stmt_, index) == SQLITE_NULL; }</span>
+
+// ---------------------------------------------------------------- DatabaseManager
+<span style = "background-color:#dfd">DatabaseManager::~DatabaseManager() { close(); }</span>
+
+<span style = "background-color:#dfd">void DatabaseManager::open(const std::string&amp; path) {
+    close();
+    path_ = path;
+    if (sqlite3_open_v2(path.c_str(), &amp;db_, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr) != SQLITE_OK) {</span>
+<span style = "background-color:#fdd">        const std::string message = db_ != nullptr ? sqlite3_errmsg(db_) : "cannot open the file";
+        close();
+        throw DatabaseException("Cannot open the database '" + path + "': " + message);
+    }</span>
+<span style = "background-color:#dfd">    execute("PRAGMA foreign_keys = ON;");  // SQLite ignores foreign keys unless this is switched on
+    Statement check(db_, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'users'");
+    check.step();
+    if (check.columnInt(0) == 0) execute(kSchemaSql);  // first run: create all tables
+}</span>
+
+<span style = "background-color:#dfd">void DatabaseManager::close() {
+    if (db_ != nullptr) {
+        sqlite3_close(db_);
+        db_ = nullptr;</span>
+    }
+<span style = "background-color:#dfd">    depth_ = 0;
+}</span>
+
+<span style = "background-color:#dfd">Statement DatabaseManager::prepare(const std::string&amp; sql) {
+    if (db_ == nullptr) throw DatabaseException("The database is not open.");
+    return Statement(db_, sql);
+}</span>
+
+<span style = "background-color:#dfd">void DatabaseManager::execute(const std::string&amp; sql) {
+    if (db_ == nullptr) throw DatabaseException("The database is not open.");
+    char* error = nullptr;
+    if (sqlite3_exec(db_, sql.c_str(), nullptr, nullptr, &amp;error) != SQLITE_OK) {</span>
+<span style = "background-color:#fdd">        const std::string message = error != nullptr ? error : "unknown error";
+        sqlite3_free(error);
+        throw DatabaseException("Database error: " + message);
+    }</span>
+<span style = "background-color:#dfd">}</span>
+
+<span style = "background-color:#dfd">long long DatabaseManager::lastInsertId() const { return sqlite3_last_insert_rowid(db_); }</span>
+
+<span style = "background-color:#fdd">void DatabaseManager::beginTransaction() {
+    if (depth_ == 0) execute("BEGIN");
+    ++depth_;
+}</span>
+
+<span style = "background-color:#fdd">void DatabaseManager::commit() {
+    if (depth_ == 0) return;
+    if (--depth_ == 0) execute("COMMIT");
+}</span>
+
+<span style = "background-color:#fdd">void DatabaseManager::rollback() {
+    if (depth_ == 0) return;
+    depth_ = 0;
+    execute("ROLLBACK");
+}</span>
+
+<span style = "background-color:#fdd">void DatabaseManager::backupTo(const std::string&amp; path) {
+    if (std::filesystem::exists(path)) throw ValidationException("That file already exists. Choose a new file name.");
+    Statement statement = prepare("VACUUM INTO ?");
+    statement.bindText(1, path);
+    statement.run();
+}</span>
+
+<span style = "background-color:#fdd">void DatabaseManager::restoreFrom(const std::string&amp; path) {
+    std::ifstream in(path, std::ios::binary);
+    char header[16] = {};
+    if (!in || !in.read(header, 15) || std::string(header, 15) != "SQLite format 3") {
+        throw ValidationException("That file is not a valid database backup.");</span>
+    }
+<span style = "background-color:#fdd">    in.close();
+    const std::string target = path_;
+    close();
+    std::filesystem::copy_file(path, target, std::filesystem::copy_options::overwrite_existing);
+    open(target);
+}</span>
+
+// ---------------------------------------------------------------- Transaction
+<span style = "background-color:#fdd">Transaction::Transaction(DatabaseManager&amp; db) : db_(db) { db_.beginTransaction(); }</span>
+
+<span style = "background-color:#fdd">Transaction::~Transaction() {
+    if (done_) return;</span>
+    try {
+<span style = "background-color:#fdd">        db_.rollback();
+    } catch (...) {</span>
+        // A destructor must not throw; the original error is already being reported.
+<span style = "background-color:#fdd">    }
+}</span>
+
+<span style = "background-color:#fdd">void Transaction::commit() {
+    db_.commit();
+    done_ = true;
+}</span>
+
+}  // namespace lms</pre>
+        <hr />
+        <table width="100%">
+            <thead>
+                <tr>
+                    <th align="center">
+                        <small>Generated by</small>
+                        <a href="https://github.com/OpenCppCoverage/OpenCppCoverage/releases">
+                            <strong>OpenCppCoverage (Version: 0.9.9.0)</strong>
+                        </a>
+                    </th>
+                </tr>
+            </thead>
+        </table>
+    </body>
+</html>
